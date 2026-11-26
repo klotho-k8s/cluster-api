@@ -10,7 +10,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/distribution v2.8.1+incompatible
 	github.com/drone/envsubst/v2 v2.0.0-20210730161058-179042472c46
-	github.com/evanphx/json-patch/v5 v5.6.0
+	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/fatih/color v1.14.1
 	github.com/flatcar/container-linux-config-transpiler v0.9.4
 	github.com/flatcar/ignition v0.36.2
@@ -123,7 +123,7 @@ require (
 	go.uber.org/zap v1.24.0 // indirect
 	go4.org v0.0.0-20201209231011-d4a079459e60 // indirect
 	golang.org/x/crypto v0.3.0 // indirect
-	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/term v0.5.0 // indirect
 	golang.org/x/text v0.7.0
 	golang.org/x/time v0.3.0 // indirect
