@@ -1,0 +1,117 @@
+name: release
+
+# Builds the Cluster API controller images that carry the pivot-aware
+# SelfHostedDeletion change and publishes them to GHCR using the
+# Actions-provided GITHUB_TOKEN (packages: write) - no personal access token.
+on:
+  push:
+    branches: [selfhosted-delete]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (e.g. v1.12.9-selfhosted.1)"
+        required: false
+        default: "v1.12.9-selfhosted.1"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Default release tag; overridden by a pushed git tag or a workflow_dispatch input.
+  RELEASE_TAG: v1.12.9-selfhosted.1
+  REGISTRY: ghcr.io/klotho-k8s
+  GO_VERSION: "1.25.11"
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # core cluster-api controller
+          - name: core
+            image: cluster-api-controller
+            file: ./Dockerfile
+            package: .
+          # kubeadm bootstrap controller
+          - name: kubeadm-bootstrap
+            image: kubeadm-bootstrap-controller
+            file: ./Dockerfile
+            package: ./bootstrap/kubeadm
+          # kubeadm control plane controller
+          - name: kubeadm-control-plane
+            image: kubeadm-control-plane-controller
+            file: ./Dockerfile
+            package: ./controlplane/kubeadm
+          # CAPD docker infrastructure manager
+          - name: docker-infrastructure
+            image: capd-manager
+            file: ./test/infrastructure/docker/Dockerfile
+            package: ./test/infrastructure/docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          TAG="${RELEASE_TAG}"
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: ${TAG}"
+
+      - name: Compute ldflags
+        id: ldflags
+        env:
+          GIT_VERSION: ${{ steps.tag.outputs.tag }}
+          GIT_COMMIT: ${{ github.sha }}
+        run: |
+          VER_PKG="sigs.k8s.io/cluster-api/version"
+          MAJOR="$(echo "${GIT_VERSION}" | sed -E 's/^v([0-9]+)\..*/\1/')"
+          MINOR="$(echo "${GIT_VERSION}" | sed -E 's/^v[0-9]+\.([0-9]+).*/\1/')"
+          BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          LDFLAGS="-X '${VER_PKG}.buildDate=${BUILD_DATE}' -X '${VER_PKG}.gitCommit=${GIT_COMMIT}' -X '${VER_PKG}.gitTreeState=clean' -X '${VER_PKG}.gitMajor=${MAJOR}' -X '${VER_PKG}.gitMinor=${MINOR}' -X '${VER_PKG}.gitVersion=${GIT_VERSION}' -X '${VER_PKG}.gitReleaseCommit=${GIT_COMMIT}'"
+          echo "ldflags=${LDFLAGS}" >> "$GITHUB_OUTPUT"
+          echo "ldflags: ${LDFLAGS}"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ steps.tag.outputs.tag }}
+            type=raw,value=latest
+            type=ref,event=tag
+
+      - name: Build and push ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          build-args: |
+            builder_image=docker.io/library/golang:${{ env.GO_VERSION }}
+            goproxy=https://proxy.golang.org
+            ARCH=amd64
+            package=${{ matrix.package }}
+            ldflags=${{ steps.ldflags.outputs.ldflags }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
